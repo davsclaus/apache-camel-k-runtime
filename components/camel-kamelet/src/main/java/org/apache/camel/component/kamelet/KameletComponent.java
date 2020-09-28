@@ -30,26 +30,50 @@ import org.apache.camel.support.DefaultComponent;
 import org.apache.camel.support.LifecycleStrategySupport;
 
 /**
- * The Kamelet Component provides support for interacting with <a href="https://knative.dev">Knative</a>.
+ * The Kamelet Component provides support for materializing routes templates.
  */
 @Component(Kamelet.SCHEME)
 public class KameletComponent extends DefaultComponent {
     private final LifecycleHandler lifecycleHandler;
 
     public KameletComponent() {
-        this(null);
+        this.lifecycleHandler = new LifecycleHandler();
     }
 
-    public KameletComponent(CamelContext context) {
-        super(context);
+    @Override
+    public Endpoint createEndpoint(String uri) throws Exception {
+        switch (uri) {
+            case "kamelet:source":
+            case "kamelet://source":
+            case "kamelet:sink":
+            case "kamelet://sink":
+                return getCamelContext().getEndpoint("direct:{{routeId}}");
+            default:
+                return super.createEndpoint(uri);
+        }
+    }
 
-        this.lifecycleHandler = new LifecycleHandler();
+    @Override
+    public Endpoint createEndpoint(String uri, Map<String, Object> parameters) throws Exception {
+        switch (uri) {
+            case "kamelet:source":
+            case "kamelet://source":
+            case "kamelet:sink":
+            case "kamelet://sink":
+                return getCamelContext().getEndpoint("direct:{{routeId}}");
+            default:
+                return super.createEndpoint(uri, parameters);
+        }
     }
 
     @Override
     protected Endpoint createEndpoint(String uri, String remaining, Map<String, Object> parameters) throws Exception {
         final String templateId = Kamelet.extractTemplateId(getCamelContext(), remaining);
         final String routeId = Kamelet.extractRouteId(getCamelContext(), remaining);
+        final KameletEndpoint endpoint = new KameletEndpoint(uri, this, templateId, routeId);
+
+        // set endpoint specific properties
+        setProperties(endpoint, parameters);
 
         //
         // The properties for the kamelets are determined by global properties
@@ -65,14 +89,8 @@ public class KameletComponent extends DefaultComponent {
         kameletProperties.put("templateId", templateId);
         kameletProperties.put("routeId", routeId);
 
-        // Remaining parameter should be related to the route and to avoid the
-        // parameters validation to fail, we need to clear the parameters map.
-        parameters.clear();
-
-        KameletEndpoint endpoint = new KameletEndpoint(uri, this, templateId, routeId, kameletProperties);
-
-        // No parameters are expected here.
-        setProperties(endpoint, parameters);
+        // set kamelet specific properties
+        endpoint.setKameletProperties(kameletProperties);
 
         return endpoint;
     }

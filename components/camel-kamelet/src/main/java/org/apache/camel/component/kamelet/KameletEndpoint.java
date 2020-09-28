@@ -17,11 +17,13 @@
 package org.apache.camel.component.kamelet;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.camel.AsyncCallback;
 import org.apache.camel.AsyncProducer;
 import org.apache.camel.Consumer;
+import org.apache.camel.DelegateEndpoint;
 import org.apache.camel.Endpoint;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
@@ -42,7 +44,7 @@ import org.apache.camel.util.ObjectHelper;
     title = "Kamelet",
     lenientProperties = true,
     label = "camel-k")
-public class KameletEndpoint extends DefaultEndpoint {
+public class KameletEndpoint extends DefaultEndpoint implements DelegateEndpoint {
     @Metadata(required = true)
     @UriPath(description = "The Route Template ID")
     private final String templateId;
@@ -52,25 +54,23 @@ public class KameletEndpoint extends DefaultEndpoint {
     private final String routeId;
 
     private final Map<String, Object> kameletProperties;
-    private final String kameletUri;
+
+    private Endpoint kameletEndpoint;
 
     public KameletEndpoint(
             String uri,
             KameletComponent component,
             String templateId,
-            String routeId,
-            Map<String, Object> kameletProperties) {
+            String routeId) {
 
         super(uri, component);
 
         ObjectHelper.notNull(templateId, "template id");
         ObjectHelper.notNull(routeId, "route id");
-        ObjectHelper.notNull(kameletProperties, "kamelet properties");
 
         this.templateId = templateId;
         this.routeId = routeId;
-        this.kameletProperties = Collections.unmodifiableMap(kameletProperties);
-        this.kameletUri = "direct:" + routeId;
+        this.kameletProperties = new HashMap<>();
     }
 
     @Override
@@ -79,8 +79,18 @@ public class KameletEndpoint extends DefaultEndpoint {
     }
 
     @Override
+    public Endpoint getEndpoint() {
+        return kameletEndpoint;
+    }
+
+    @Override
     public boolean isLenientProperties() {
         return true;
+    }
+
+    @Override
+    public boolean isSingleton() {
+        return false;
     }
 
     public String getTemplateId() {
@@ -91,8 +101,15 @@ public class KameletEndpoint extends DefaultEndpoint {
         return routeId;
     }
 
+    public void setKameletProperties(Map<String, Object> kameletProperties) {
+        if (kameletProperties != null) {
+            this.kameletProperties.clear();
+            this.kameletProperties.putAll(kameletProperties);
+        }
+    }
+
     public Map<String, Object> getKameletProperties() {
-        return kameletProperties;
+        return Collections.unmodifiableMap(kameletProperties);
     }
 
     @Override
@@ -110,7 +127,22 @@ public class KameletEndpoint extends DefaultEndpoint {
     @Override
     protected void doInit() throws Exception {
         super.doInit();
+
         getComponent().onEndpointAdd(this);
+    }
+
+    @Override
+    protected void doStart() throws Exception {
+        kameletEndpoint =  getCamelContext().getEndpoint("direct:" + routeId);
+        ServiceHelper.startService(kameletEndpoint);
+
+        super.doStart();
+    }
+
+    @Override
+    protected void doStop() throws Exception {
+        ServiceHelper.stopService(kameletEndpoint);
+        super.doStop();
     }
 
     // *********************************
@@ -120,7 +152,6 @@ public class KameletEndpoint extends DefaultEndpoint {
     // *********************************
 
     private class KemeletConsumer extends DefaultConsumer {
-        private volatile Endpoint endpoint;
         private volatile Consumer consumer;
 
         public KemeletConsumer(Processor processor) {
@@ -129,22 +160,20 @@ public class KameletEndpoint extends DefaultEndpoint {
 
         @Override
         protected void doStart() throws Exception {
-            endpoint = getCamelContext().getEndpoint(kameletUri);
-            consumer = endpoint.createConsumer(getProcessor());
+            consumer = kameletEndpoint.createConsumer(getProcessor());
 
-            ServiceHelper.startService(endpoint, consumer);
+            ServiceHelper.startService(consumer);
             super.doStart();
         }
 
         @Override
         protected void doStop() throws Exception {
-            ServiceHelper.stopService(consumer, endpoint);
+            ServiceHelper.stopService(consumer);
             super.doStop();
         }
     }
 
     private class KameletProducer extends DefaultAsyncProducer {
-        private volatile Endpoint endpoint;
         private volatile AsyncProducer producer;
 
         public KameletProducer() {
@@ -163,15 +192,14 @@ public class KameletEndpoint extends DefaultEndpoint {
 
         @Override
         protected void doStart() throws Exception {
-            endpoint = getCamelContext().getEndpoint(kameletUri);
-            producer = endpoint.createAsyncProducer();
-            ServiceHelper.startService(endpoint, producer);
+            producer = kameletEndpoint.createAsyncProducer();
+            ServiceHelper.startService(producer);
             super.doStart();
         }
 
         @Override
         protected void doStop() throws Exception {
-            ServiceHelper.stopService(producer, endpoint);
+            ServiceHelper.stopService(producer);
             super.doStop();
         }
     }
